@@ -1,0 +1,148 @@
+ユーザー一覧表示システム
+Next.jsでシンプルな「ユーザー一覧表示システム」を作成してください。
+システム概要
+Supabaseデータベースから外部ユーザーの一覧を取得して表示する最小限のシステムです。
+
+機能要件
+ユーザー一覧ページ (/admin/users)
+表示内容:
+	• deleted_atがNULLのユーザーのみ表示
+	• テーブル形式で以下の項目を表示: 
+		○ メールアドレス
+		○ 氏名
+		○ 会社名
+		○ プロジェクト名
+		○ プロジェクトコード
+		○ 権限
+		○ 登録日（YYYY/MM/DD形式）
+	• created_atの降順（新しい順）でソート
+	• ユーザーが0件の場合は「登録ユーザーがいません」と表示
+
+技術仕様
+使用技術
+	• Next.js 14 (App Router)
+	• TypeScript
+	• Tailwind CSS
+	• @supabase/supabase-js
+データベーススキーマ
+profilesテーブル（Supabaseに作成済み）
+{
+  id: UUID (Primary Key)
+  email: TEXT (UNIQUE, NOT NULL)
+  full_name: TEXT (NOT NULL)
+  user_type: TEXT (NOT NULL)
+  role: TEXT (NOT NULL, DEFAULT 'user')
+  company_name: TEXT
+  project_name: TEXT
+  project_code: TEXT (8桁)
+  department: TEXT
+  employee_number: TEXT
+  created_at: TIMESTAMP (DEFAULT NOW())
+  updated_at: TIMESTAMP (DEFAULT NOW())
+  deleted_at: TIMESTAMP (NULL)
+}
+API Routes
+GET /api/admin/users
+	• 処理内容: 
+		○ Supabaseから deleted_at IS NULL のユーザーを取得
+		○ created_at DESC でソート
+		○ 必要なカラムのみ選択: id, email, full_name, company_name, project_name, project_code, role, created_at
+	• レスポンス:
+{
+  users: Array<{
+    id: string
+    email: string
+    full_name: string
+    company_name: string
+    project_name: string
+    project_code: string
+    role: string
+    created_at: string
+  }>
+}
+	• エラー時:
+{
+  error: "エラーメッセージ"
+}
+Supabase設定
+lib/supabase.tsで2つのクライアントを作成:
+import { createClient } from '@supabase/supabase-js'
+// クライアント側用
+export const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
+// サーバー側（API Routes）用
+export const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
+使い分け:
+	• API Routes（/api/admin/users/route.ts）: supabaseAdmin を使用
+環境変数
+プロジェクトルートに .env.local ファイルを作成し、以下の環境変数を設定してください:
+NEXT_PUBLIC_SUPABASE_URL=https://qassepoatkikvmponqea.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhc3NlcG9hdGtpa3ZtcG9ucWVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjEzOTYwODYsImV4cCI6MjA3Njk3MjA4Nn0.J19GPT0xvmw9l6cpHRPrZ_NX3PsCLKctKYE9Zd4hKbY
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFhc3NlcG9hdGtpa3ZtcG9ucWVhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MTM5NjA4NiwiZXhwIjoyMDc2OTcyMDg2fQ.x8EYn9msjCBwJS-89bq7bx-TsKFGOPP2G-HQkBV_xVk
+
+UI/UX要件
+デザイン
+	• Tailwind CSSでシンプルなデザイン
+	• レスポンシブ対応（スマホでも見やすく）
+	• テーブルはストライプ（縞模様）で見やすく
+ページ構成
+	• ページタイトル: 「ユーザー一覧」
+	• 説明文: 「登録済みの外部ユーザーを管理します」
+	• テーブルヘッダー: 
+		○ メールアドレス
+		○ 氏名
+		○ 会社名
+		○ プロジェクト名
+		○ プロジェクトコード
+		○ 権限
+		○ 登録日
+ローディング状態
+	• データ取得中は「読み込み中...」と表示
+	• ローディングスピナーを表示
+エラーハンドリング
+	• データ取得失敗時は赤色のエラーメッセージを表示
+	• エラーメッセージ: 「ユーザー情報の取得に失敗しました」
+
+実装の重要ポイント
+	1. API Routeでのデータ取得:
+const { data, error } = await supabaseAdmin
+  .from('profiles')
+  .select('id, email, full_name, company_name, project_name, project_code, role, created_at')
+  .is('deleted_at', null)
+  .order('created_at', { ascending: false })
+	2. 日付のフォーマット:
+new Date(created_at).toLocaleDateString('ja-JP', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+})
+	3. エラーハンドリング:
+	• 全てのAPI Routeで try-catch を使用
+	• エラー時は適切なHTTPステータスコード（500）を返す
+	4. 型安全性:
+	• TypeScriptの型定義を適切に設定
+	• any型は使用しない
+
+ページ例
+┌─────────────────────────────────────────────────┐
+│  ユーザー一覧                                    │
+│  登録済みの外部ユーザーを管理します               │
+├─────────────────────────────────────────────────┤
+│ メールアドレス  │ 氏名  │ 会社名 │ ... │ 登録日 │
+├─────────────────────────────────────────────────┤
+│ tanaka@...     │ 田中  │ ABC社  │ ... │ 2024/... │
+│ suzuki@...     │ 鈴木  │ XYZ社  │ ... │ 2024/... │
+└─────────────────────────────────────────────────┘
+
+完全に動作するコードを作成してください。全てのUIテキストとメッセージは日本語で表示してください。

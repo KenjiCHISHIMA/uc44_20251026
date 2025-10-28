@@ -1,0 +1,450 @@
+# ユーザー招待・登録機能
+
+Next.jsで「ユーザー招待・登録機能」を作成してください。
+
+## システム概要
+
+ログインユーザーが外部ユーザーを招待し、招待されたユーザーがメールのリンクから自分で登録するシステムです。
+
+## 業務フロー
+
+1. **招待者（ログインユーザー）**: ユーザー一覧画面上部の「ユーザーを招待する」ボタンを押下
+2. **招待者**: モーダルが表示され、招待するユーザーのメールアドレスを入力し「招待する」ボタン押下
+3. **システム**: Amazon SESから招待メールを送信
+4. **被招待者**: メールのリンクから登録ページにアクセスし、必要情報を入力して「登録する」ボタン押下
+5. **システム**: profilesテーブルにユーザー登録
+
+## 機能要件
+
+### 1. ユーザー一覧ページの更新 (/admin/users)
+
+**追加要素:**
+- ページ上部に「ユーザーを招待する」ボタンを配置
+- ボタンは青色、目立つデザイン
+
+**招待モーダル:**
+- 背景を暗くして中央にモーダル表示
+- タイトル: 「ユーザーを招待」
+- 入力項目:
+  - メールアドレス（text input、placeholder: "例: user@example.com"）
+- ボタン:
+  - 「招待する」（青色、メイン）
+  - 「キャンセル」（グレー、サブ）
+- バリデーション:
+  - メールアドレス形式チェック
+  - 空欄チェック
+
+**フィードバック:**
+- 招待成功時: 緑色の成功メッセージ「招待メールを送信しました」（3秒後に自動で消える）
+- 既に登録済み: 黄色の警告メッセージ「このメールアドレスは既に登録されています」
+- 送信エラー: 赤色のエラーメッセージ「招待メールの送信に失敗しました」
+
+### 2. 招待処理 API
+
+**POST /api/admin/invitations**
+
+**リクエスト:**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**処理内容:**
+1. メールアドレスの形式チェック
+2. profilesテーブルをチェック
+   - 既に存在する場合: エラー（ステータス400）「既に登録されています」
+3. invitation_tokensテーブルをチェック
+   - 既存の未使用トークンがある場合: 削除（新しいトークンで上書き）
+4. 新しい招待トークンを生成（UUID v4）
+5. invitation_tokensテーブルに保存:
+   - email: 招待メールアドレス
+   - token: 生成したUUID
+   - user_type: 'external'（固定）
+   - expires_at: 現在時刻 + 3日間
+   - used: false
+   - created_at: 現在時刻
+6. Amazon SES経由で招待メールを送信
+
+**レスポンス（成功）:**
+```json
+{
+  "message": "招待メールを送信しました"
+}
+```
+
+**レスポンス（エラー）:**
+```json
+{
+  "error": "既に登録されています"
+}
+```
+
+### 3. 招待メール
+
+**送信設定:**
+- SMTP経由でAmazon SESを使用
+- ライブラリ: nodemailer
+
+**メール内容:**
+```
+件名: [ユーザー管理システム] ユーザー登録のご案内
+
+本文:
+ユーザー管理システムへの登録招待が届きました。
+
+以下のURLから登録手続きを行ってください。
+{NEXT_PUBLIC_BASE_URL}/register?token={トークン}
+
+※このリンクの有効期限は3日間です。
+有効期限: {YYYY年MM月DD日 HH:MM}
+
+このメールに心当たりがない場合は、破棄してください。
+```
+
+### 4. ユーザー登録ページ (/register)
+
+**URL構造:**
+- `/register?token={トークン}`
+
+**ページレイアウト:**
+- タイトル: 「ユーザー登録」
+- 説明文: 「以下の情報を入力して登録を完了してください」
+
+**入力フォーム（全て必須）:**
+1. 氏名（full_name）
+   - プレースホルダー: "例: 山田太郎"
+2. 会社名（company_name）
+   - プレースホルダー: "例: 株式会社サンプル"
+3. プロジェクト名（project_name）
+   - プレースホルダー: "例: Webサイトリニューアル"
+4. プロジェクトコード（project_code）
+   - プレースホルダー: "例: PROJ2024"
+   - バリデーション: 8桁（英数字）
+
+**ボタン:**
+- 「登録する」（青色、大きく）
+
+**バリデーション:**
+- 全項目必須チェック
+- project_codeは8桁チェック
+- トークンの有効性チェック
+
+**エラー表示:**
+- トークンが無効/期限切れ: 「招待リンクが無効または期限切れです」
+- 入力エラー: 各項目の下に赤色でエラーメッセージ
+- 登録失敗: ページ上部に赤色のエラーメッセージ
+
+**成功時:**
+- 緑色の背景に白文字で大きく「登録が完了しました」
+- 「登録完了」の見出し
+- 「ユーザー登録が正常に完了しました。管理者からの連絡をお待ちください。」のメッセージ
+- このページで停止（他ページへの遷移なし）
+
+### 5. 登録処理 API
+
+**POST /api/register**
+
+**リクエスト:**
+```json
+{
+  "token": "uuid-token-string",
+  "full_name": "山田太郎",
+  "company_name": "株式会社サンプル",
+  "project_name": "Webサイトリニューアル",
+  "project_code": "PROJ2024"
+}
+```
+
+**処理内容:**
+1. トークンの検証:
+   - invitation_tokensテーブルから取得
+   - 存在チェック
+   - used = false チェック
+   - expires_at > 現在時刻 チェック
+2. 入力値のバリデーション:
+   - 全項目の必須チェック
+   - project_codeの8桁チェック
+3. profilesテーブルに登録:
+   - id: 新規UUID生成
+   - email: トークンに紐づくメールアドレス
+   - full_name: リクエストから
+   - user_type: 'external'（固定）
+   - role: 'user'（固定）
+   - company_name: リクエストから
+   - project_name: リクエストから
+   - project_code: リクエストから
+   - department: null
+   - employee_number: null
+   - created_at: 現在時刻
+   - updated_at: 現在時刻
+   - deleted_at: null
+4. invitation_tokensテーブルを更新:
+   - used = true に変更
+
+**レスポンス（成功）:**
+```json
+{
+  "message": "登録が完了しました"
+}
+```
+
+**レスポンス（エラー）:**
+```json
+{
+  "error": "招待リンクが無効または期限切れです"
+}
+```
+
+## 技術仕様
+
+### 使用技術
+- Next.js 14 (App Router)
+- TypeScript
+- Tailwind CSS
+- @supabase/supabase-js
+- nodemailer（メール送信）
+
+### 環境変数（.env.local）
+
+**既存:**
+```
+NEXT_PUBLIC_SUPABASE_URL=https://qassepoatkikvmponqea.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+```
+
+**追加:**
+```
+# Amazon SES設定
+SMTP_HOST=email-smtp.ap-northeast-1.amazonaws.com
+SMTP_PORT=587
+SMTP_USER=AKIA3WCZ7OC2M7QE5P5Z
+SMTP_PASS=BOh0ENNkYtTSt8AmcSf07HjA7GIrunlhS1Hl5pNV8aDI
+FROM_EMAIL=tatatk194@gmail.com
+
+# アプリケーションURL
+NEXT_PUBLIC_BASE_URL=http://localhost:3001
+```
+
+### データベーススキーマ
+
+**invitation_tokens テーブル（既存）:**
+```typescript
+{
+  id: UUID (Primary Key, auto-generated)
+  email: TEXT (NOT NULL)
+  token: TEXT (NOT NULL, UNIQUE)
+  user_type: TEXT (NOT NULL, CHECK: 'employee' | 'external')
+  expires_at: TIMESTAMP (NOT NULL)
+  used: BOOLEAN (DEFAULT false)
+  created_at: TIMESTAMP (DEFAULT NOW())
+}
+```
+
+**profiles テーブル（既存）:**
+```typescript
+{
+  id: UUID (Primary Key)
+  email: TEXT (UNIQUE, NOT NULL)
+  full_name: TEXT (NOT NULL)
+  user_type: TEXT (NOT NULL, CHECK: 'employee' | 'external')
+  role: TEXT (NOT NULL, DEFAULT 'user')
+  company_name: TEXT
+  project_name: TEXT
+  project_code: TEXT (8桁)
+  department: TEXT
+  employee_number: TEXT
+  created_at: TIMESTAMP (DEFAULT NOW())
+  updated_at: TIMESTAMP (DEFAULT NOW())
+  deleted_at: TIMESTAMP (NULL)
+}
+```
+
+### TypeScript型定義
+
+**types/invitation.ts（新規作成）:**
+```typescript
+export interface InvitationToken {
+  id: string
+  email: string
+  token: string
+  user_type: 'employee' | 'external'
+  expires_at: string
+  used: boolean
+  created_at: string
+}
+
+export interface InvitationRequest {
+  email: string
+}
+
+export interface RegistrationRequest {
+  token: string
+  full_name: string
+  company_name: string
+  project_name: string
+  project_code: string
+}
+```
+
+### API Routes
+
+1. **POST /api/admin/invitations** - 招待メール送信
+2. **POST /api/register** - ユーザー登録
+
+### ページ
+
+1. **/admin/users** - ユーザー一覧（更新）
+2. **/register** - ユーザー登録ページ（新規）
+
+## UI/UX要件
+
+### デザイン
+- Tailwind CSSでシンプルなデザイン
+- 既存のユーザー一覧と統一感のあるデザイン
+- レスポンシブ対応（スマホでも使いやすく）
+
+### モーダル
+- 背景: 半透明の黒（opacity: 0.5）
+- モーダル本体: 白背景、角丸、影付き
+- 最大幅: 500px
+- 中央配置
+- Escキーで閉じる
+- 背景クリックで閉じる
+
+### フォーム
+- 各入力欄は明確にラベル表示
+- エラーメッセージは該当入力欄の下に赤色で表示
+- 必須マークは赤色の「*」で表示
+
+### ローディング状態
+- ボタンクリック後: ボタンを無効化 + 「送信中...」表示
+- スピナーアイコンも表示
+
+### フィードバック
+- 成功: 緑色の背景（bg-green-50）+ 緑色のテキスト（text-green-800）
+- 警告: 黄色の背景（bg-yellow-50）+ 黄色のテキスト（text-yellow-800）
+- エラー: 赤色の背景（bg-red-50）+ 赤色のテキスト（text-red-800）
+
+## 実装の重要ポイント
+
+### 1. セキュリティ
+- トークンはUUID v4でランダム生成
+- トークンは一度きりの使用（used = true で無効化）
+- 有効期限チェックは必須
+- SMTP認証情報は環境変数で管理
+
+### 2. エラーハンドリング
+- 全てのAPI Routeでtry-catchを使用
+- 適切なHTTPステータスコードを返す
+- ユーザーフレンドリーなエラーメッセージ
+
+### 3. バリデーション
+- クライアント側とサーバー側の両方で実施
+- メールアドレス形式チェック
+- project_codeの8桁チェック
+- 必須項目チェック
+
+### 4. トランザクション処理
+- ユーザー登録時、profilesへのINSERTとinvitation_tokensのUPDATEは同一トランザクションで処理（できれば）
+
+### 5. メール送信
+- nodemailerを使用
+- 送信失敗時のエラーハンドリング
+- 接続タイムアウトの設定
+
+### 6. 型安全性
+- TypeScriptの型定義を適切に設定
+- any型は使用しない
+- APIレスポンスの型も定義
+
+## 注意事項
+
+### 現時点の仕様（将来変更の可能性あり）
+- 認証機能は不要（将来実装予定）
+- user_typeは全て'external'
+- roleは全て'user'
+- 入力項目は4項目のみ（full_name, company_name, project_name, project_code）
+
+### 重複チェック
+- profilesに存在する場合: 招待不可（エラー表示）
+- invitation_tokensに存在する場合: 既存を削除して新規作成（再招待可能）
+
+### ポート番号
+- 常にポート3001を使用（ポート3000は別プロジェクトで使用中）
+- NEXT_PUBLIC_BASE_URLも3001を使用
+
+## 完成イメージ
+
+### ユーザー一覧ページ
+```
+┌─────────────────────────────────────────────┐
+│  ユーザー一覧              [ユーザーを招待する] │
+│  登録済みの外部ユーザーを管理します            │
+├─────────────────────────────────────────────┤
+│ メールアドレス │ 氏名 │ 会社名 │ ... │ 登録日 │
+├─────────────────────────────────────────────┤
+│ tanaka@...    │ 田中 │ ABC社 │ ... │ 2024/...│
+└─────────────────────────────────────────────┘
+```
+
+### 招待モーダル
+```
+┌─────────────────────────────────────┐
+│  ユーザーを招待             [×]      │
+├─────────────────────────────────────┤
+│                                     │
+│  メールアドレス *                    │
+│  ┌─────────────────────────────┐   │
+│  │ user@example.com            │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│       [キャンセル]  [招待する]       │
+└─────────────────────────────────────┘
+```
+
+### 登録ページ
+```
+┌─────────────────────────────────────┐
+│  ユーザー登録                        │
+│  以下の情報を入力して登録を完了して    │
+│  ください                           │
+├─────────────────────────────────────┤
+│  氏名 *                             │
+│  ┌─────────────────────────────┐   │
+│  │ 山田太郎                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  会社名 *                           │
+│  ┌─────────────────────────────┐   │
+│  │ 株式会社サンプル             │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  プロジェクト名 *                    │
+│  ┌─────────────────────────────┐   │
+│  │ Webサイトリニューアル         │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  プロジェクトコード * (8桁)          │
+│  ┌─────────────────────────────┐   │
+│  │ PROJ2024                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│           [登録する]                │
+└─────────────────────────────────────┘
+```
+
+## 実装順序の推奨
+
+1. 型定義の追加（types/invitation.ts）
+2. 環境変数の追加（.env.local）
+3. メール送信ユーティリティの作成（lib/email.ts）
+4. 招待API の実装（/api/admin/invitations/route.ts）
+5. 登録API の実装（/api/register/route.ts）
+6. 招待モーダルコンポーネントの作成
+7. ユーザー一覧ページの更新（招待ボタン追加）
+8. 登録ページの作成（/register/page.tsx）
+9. 統合テスト
+
+完全に動作するコードを作成してください。全てのUIテキストとメッセージは日本語で表示してください。
