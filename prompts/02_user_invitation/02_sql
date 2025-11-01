@@ -1,0 +1,29 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.invitation_tokens (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  email text NOT NULL,
+  token text NOT NULL UNIQUE,
+  user_type text NOT NULL CHECK (user_type = ANY (ARRAY['employee'::text, 'external'::text])),
+  expires_at timestamp with time zone NOT NULL,
+  used boolean DEFAULT false,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT invitation_tokens_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.profiles (
+  id uuid NOT NULL,
+  email text NOT NULL UNIQUE,
+  full_name text NOT NULL,
+  user_type text NOT NULL CHECK (user_type = ANY (ARRAY['employee'::text, 'external'::text])),
+  role text NOT NULL DEFAULT 'user'::text,
+  company_name text,
+  project_name text,
+  project_code text CHECK (project_code IS NULL OR char_length(project_code) = 8),
+  department text,
+  employee_number text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  deleted_at timestamp with time zone,
+  CONSTRAINT profiles_pkey PRIMARY KEY (id)
+);

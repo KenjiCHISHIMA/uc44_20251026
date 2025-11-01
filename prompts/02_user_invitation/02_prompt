@@ -447,4 +447,106 @@ export interface RegistrationRequest {
 8. 登録ページの作成（/register/page.tsx）
 9. 統合テスト
 
+## デバッグとトラブルシューティング
+
+### 実装時のデバッグログ
+
+**必須：全てのAPI Routeとメール送信関数に詳細なconsole.logを追加すること**
+
+#### 招待API（app/api/admin/invitations/route.ts）に追加するログ：
+```typescript
+console.log('=== Invitation API called ===')
+console.log('Email received:', email)
+console.log('Checking existing user...')
+console.log('User does not exist, proceeding...')
+console.log('Attempting to send email...')
+console.log('Email sent successfully')
+console.log('Invitation process completed successfully')
+```
+
+#### メール送信関数（lib/email.ts）に追加するログ：
+```typescript
+console.log('sendInvitationEmail called with:', { email, token })
+console.log('Environment check:', {
+  SMTP_HOST: process.env.SMTP_HOST,
+  SMTP_PORT: process.env.SMTP_PORT,
+  SMTP_USER: process.env.SMTP_USER,
+  SMTP_PASS: process.env.SMTP_PASS ? '***' : 'NOT SET',
+  FROM_EMAIL: process.env.FROM_EMAIL,
+  NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
+})
+console.log('Sending email with options:', { from, to, subject })
+console.log('Email sent successfully:', result)
+```
+
+### よくある問題と解決方法
+
+#### 1. メールが届かない場合
+**チェック項目：**
+- ✅ サーバーログで `Email sent successfully` が出力されているか確認
+- ✅ **迷惑メールフォルダを確認**（Amazon SESからの初回送信は迷惑メール判定されやすい）
+- ✅ 環境変数が正しく設定されているか確認（特にSMTP_PASS、FROM_EMAIL）
+- ✅ Amazon SESの送信制限（Sandbox環境の場合、認証済みメールアドレスにのみ送信可能）
+
+**対処法：**
+1. サーバーログで `Environment check` の出力を確認
+2. 迷惑メールフォルダを確認
+3. Amazon SES Sandboxから本番環境に移行（必要な場合）
+
+#### 2. 成功メッセージが表示されない場合
+**チェック項目：**
+- ✅ ブラウザの開発者ツール（F12）→ Consoleタブでエラー確認
+- ✅ Networkタブで `/api/admin/invitations` のレスポンスを確認
+- ✅ モーダルの `onSuccess` コールバックが正しく呼ばれているか
+
+**対処法：**
+1. ブラウザコンソールでエラーメッセージを確認
+2. API レスポンスが200 OKで返ってきているか確認
+3. モーダルコンポーネントの状態管理を確認
+
+#### 3. 登録ページでトークンエラーが出る場合
+**チェック項目：**
+- ✅ URLパラメータにトークンが含まれているか（`?token=...`）
+- ✅ トークンの有効期限（3日間）が切れていないか
+- ✅ トークンが既に使用済み（used = true）になっていないか
+
+**対処法：**
+1. URLを確認：`http://localhost:3001/register?token={UUID}`
+2. 新しい招待メールを送り直す
+3. データベースで `invitation_tokens` テーブルを確認
+
+### テスト手順
+
+1. **招待機能のテスト：**
+   - ユーザー一覧ページで「ユーザーを招待する」ボタンをクリック
+   - メールアドレスを入力して「招待する」ボタンをクリック
+   - 緑色の成功メッセージが表示されることを確認
+   - サーバーログで `Invitation process completed successfully` を確認
+   - **迷惑メールフォルダも含めて**メールが届いているか確認
+
+2. **登録機能のテスト：**
+   - メール内のリンクをクリック
+   - 登録フォームに情報を入力
+   - 「登録する」ボタンをクリック
+   - 登録完了画面が表示されることを確認
+   - ユーザー一覧に新しいユーザーが表示されることを確認
+
+3. **エラーケースのテスト：**
+   - 同じメールアドレスで再度招待（「既に登録されています」エラー）
+   - 無効なトークンでアクセス（エラー画面表示）
+   - 8桁以外のプロジェクトコード入力（バリデーションエラー）
+
+### 本番環境への移行時の注意
+
+**Amazon SES Sandboxの解除：**
+- 開発環境では、認証済みメールアドレスにのみ送信可能
+- 本番環境では、AWS SupportにSandbox解除リクエストを送信
+- SPF/DKIMレコードの設定でメール到達率を改善
+
+**推奨設定：**
+- 送信元メールアドレスを独自ドメインに変更
+- DKIM署名の有効化
+- SPFレコードの設定
+- 送信レート制限の監視
+
 完全に動作するコードを作成してください。全てのUIテキストとメッセージは日本語で表示してください。
